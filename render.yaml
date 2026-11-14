@@ -1,0 +1,29 @@
+# نشر myface على Render — خدمة واحدة، بلا نماذج ضخمة.
+services:
+  - type: web
+    name: myface
+    runtime: python
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /healthcheck
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ALLOWED_USER_ID
+        value: "7958260008"
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: AD_DURATION
+        value: "3"
+      - key: MAX_VIDEO_SECONDS
+        value: "20"
+      - key: MAX_VIDEO_WIDTH
+        value: "640"
+      - key: MAX_UPLOAD_MB
+        value: "20"
+      - key: LOG_LEVEL
+        value: INFO

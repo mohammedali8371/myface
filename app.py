@@ -54,8 +54,10 @@ WEBHOOK_URL = f"{PUBLIC_URL}{WEBHOOK_PATH}" if PUBLIC_URL else ""
 AD_DURATION = int(os.getenv("AD_DURATION", "3") or 3)
 MAX_VIDEO_SECONDS = int(os.getenv("MAX_VIDEO_SECONDS", "20") or 20)
 MAX_VIDEO_WIDTH = int(os.getenv("MAX_VIDEO_WIDTH", "640") or 640)
+MAX_IMAGE_SIDE = int(os.getenv("MAX_IMAGE_SIDE", "2400") or 2400)
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "20") or 20)
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+SERVICE_VERSION = "2026.11.14.1"
 STARTED_AT = time.time()
 
 logging.basicConfig(
@@ -234,6 +236,16 @@ def buffer_to_bgr(buf: io.BytesIO) -> np.ndarray:
     img = cv2.imdecode(data, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("تعذّر فك ترميز الصورة — أرسل صورة JPG/PNG صالحة.")
+    # حماية الذاكرة على الخطة المجانية: نصغّر الصور الضخمة فقط.
+    height, width = img.shape[:2]
+    longest = max(height, width)
+    if MAX_IMAGE_SIDE > 0 and longest > MAX_IMAGE_SIDE:
+        scale = MAX_IMAGE_SIDE / float(longest)
+        img = cv2.resize(
+            img,
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
     return img
 
 
@@ -332,6 +344,43 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     return await cmd_start(update, ctx)
 
 
+def build_developer_report() -> str:
+    """رسالة تشخيصية جاهزة للمطور تُرسل من البوت نفسه."""
+    uptime = int(time.time() - STARTED_AT)
+    hours, remainder = divmod(uptime, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return (
+        "🛠 <b>رسالة المطور — myface</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"📦 الإصدار: <code>{SERVICE_VERSION}</code>\n"
+        f"⏱ مدة التشغيل: <b>{hours}س {minutes}د {seconds}ث</b>\n"
+        f"🔗 Webhook: <b>{'مفعّل' if WEBHOOK_URL else 'وضع Polling'}</b>\n"
+        f"🌐 العنوان: <code>{PUBLIC_URL or '—'}</code>\n"
+        f"🔒 المستخدم المسموح: <code>{ALLOWED_USER_ID or '—'}</code>\n"
+        f"🔑 التوكن: <b>{'موجود' if TOKEN else 'مفقود'}</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🎬 حد الفيديو: <b>{MAX_VIDEO_SECONDS}</b> ثانية • عرض <b>{MAX_VIDEO_WIDTH}</b>\n"
+        f"🖼 أقصى بُعد للصورة: <b>{MAX_IMAGE_SIDE}</b>px\n"
+        f"📤 أقصى حجم ملف: <b>{MAX_UPLOAD_MB}</b>MB\n"
+        f"⏳ محاكاة الإعلان: <b>{AD_DURATION}</b> ثانية\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🐍 Python: <code>{os.sys.version.split()[0]}</code>\n"
+        f"👁 OpenCV: <code>{cv2.__version__}</code> • NumPy: <code>{np.__version__}</code>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "✅ الأوامر: /faceswap /inpaint /cartoon /blur /gray /sketch /edges\n"
+        "✅ الصور والفيديو يعملان عبر OpenCV دون نماذج ضخمة.\n"
+        "ℹ️ المطلوب على Render: TELEGRAM_BOT_TOKEN فقط، والباقي اختياري."
+    )
+
+
+async def cmd_developer(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return await deny(update)
+    await update.message.reply_text(
+        build_developer_report(), parse_mode="HTML", disable_web_page_preview=True
+    )
+
+
 async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_allowed(update):
         return await deny(update)
@@ -339,14 +388,14 @@ async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("تم الإلغاء. أرسل صورة أو فيديو جديدًا.")
 
 
-def _need_ready(update: Update, ctx: ContextTypes.DEFAULT_TYPE, kind: str) -> bool:
+async def _need_ready(update: Update, ctx: ContextTypes.DEFAULT_TYPE, kind: str) -> bool:
     if not ctx.user_data.get("ad_passed"):
-        asyncio.create_task(update.message.reply_text("أرسل الصورة/الفيديو أولًا ثم انتظر انتهاء المحاكاة."))
+        await update.message.reply_text("أرسل الصورة/الفيديو أولًا ثم انتظر انتهاء المحاكاة.")
         return False
     if ctx.user_data.get("target_kind") != kind:
-        asyncio.create_task(update.message.reply_text(
+        await update.message.reply_text(
             "هذا الأمر يحتاج صورة." if kind == "photo" else "هذا الأمر يحتاج فيديو."
-        ))
+        )
         return False
     return True
 
@@ -354,7 +403,7 @@ def _need_ready(update: Update, ctx: ContextTypes.DEFAULT_TYPE, kind: str) -> bo
 async def cmd_faceswap(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_allowed(update):
         return await deny(update)
-    if not _need_ready(update, ctx, "photo"):
+    if not await _need_ready(update, ctx, "photo"):
         return
     ctx.user_data["expecting_reference"] = True
     await update.message.reply_text("أرسل الآن صورة الوجه المرجعي (JPG/PNG).")
@@ -363,7 +412,7 @@ async def cmd_faceswap(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_inpaint(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_allowed(update):
         return await deny(update)
-    if not _need_ready(update, ctx, "photo"):
+    if not await _need_ready(update, ctx, "photo"):
         return
     ctx.user_data["expecting_mask"] = True
     await update.message.reply_text(
@@ -597,6 +646,7 @@ async def healthcheck(_: Request) -> JSONResponse:
         {
             "ok": True,
             "service": "myface",
+            "version": SERVICE_VERSION,
             "uptime": int(time.time() - STARTED_AT),
             "webhook": bool(WEBHOOK_URL),
         }
@@ -613,6 +663,25 @@ def build_starlette_app(ptb_app: Application) -> Starlette:
         if WEBHOOK_URL:
             await ptb_app.initialize()
             await ptb_app.start()
+            try:
+                from telegram import BotCommand
+
+                await ptb_app.bot.set_my_commands(
+                    [
+                        BotCommand("start", "بدء البوت والمساعدة"),
+                        BotCommand("faceswap", "تبديل الوجه بصورة مرجعية"),
+                        BotCommand("inpaint", "تعديل منطقة عبر ماسك"),
+                        BotCommand("cartoon", "تأثير كرتون"),
+                        BotCommand("blur", "تمويه"),
+                        BotCommand("gray", "أبيض وأسود"),
+                        BotCommand("sketch", "رسم بالقلم"),
+                        BotCommand("edges", "حدود"),
+                        BotCommand("cancel", "إلغاء الحالة"),
+                        BotCommand("developer", "رسالة تشخيص للمطور"),
+                    ]
+                )
+            except Exception:
+                logger.debug("تعذر ضبط قائمة أوامر البوت", exc_info=True)
             await ptb_app.bot.set_webhook(
                 url=WEBHOOK_URL,
                 secret_token=WEBHOOK_SECRET or None,
@@ -673,18 +742,15 @@ async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 # ============================================================
 # 7) نقطة الدخول
 # ============================================================
-def build_application() -> Application:
+def build_application(*, webhook: bool = True) -> Application:
     if not TOKEN:
         raise RuntimeError(
             "TELEGRAM_BOT_TOKEN غير موجود. أضفه من متغيرات البيئة على Render."
         )
-    ptb_app = (
-        Application.builder()
-        .token(TOKEN)
-        .updater(None)
-        .concurrent_updates(4)
-        .build()
-    )
+    builder = Application.builder().token(TOKEN).concurrent_updates(4)
+    if webhook:
+        builder = builder.updater(None)
+    ptb_app = builder.build()
     ptb_app.add_handler(CommandHandler("start", cmd_start))
     ptb_app.add_handler(CommandHandler("help", cmd_help))
     ptb_app.add_handler(CommandHandler("cancel", cmd_cancel))
@@ -695,6 +761,8 @@ def build_application() -> Application:
     ptb_app.add_handler(CommandHandler("gray", cmd_gray))
     ptb_app.add_handler(CommandHandler("sketch", cmd_sketch))
     ptb_app.add_handler(CommandHandler("edges", cmd_edges))
+    ptb_app.add_handler(CommandHandler("developer", cmd_developer))
+    ptb_app.add_handler(CommandHandler("status", cmd_developer))
     ptb_app.add_handler(CommandHandler("cleanup", cmd_cleanup))
     ptb_app.add_handler(CallbackQueryHandler(on_callback))
     ptb_app.add_handler(
@@ -708,12 +776,20 @@ def build_application() -> Application:
 
 
 def main() -> None:
-    if not WEBHOOK_URL:
-        logger.error("RENDER_EXTERNAL_URL/PUBLIC_URL غير موجود — لا يمكن تسجيل Webhook.")
-        raise SystemExit(1)
-    application = build_application()
-    web_app = build_starlette_app(application)
-    uvicorn.run(web_app, host="0.0.0.0", port=PORT, log_level="info")
+    if WEBHOOK_URL:
+        application = build_application(webhook=True)
+        web_app = build_starlette_app(application)
+        uvicorn.run(web_app, host="0.0.0.0", port=PORT, log_level="info")
+        return
+    # تشغيل محلي/احتياطي بلا عنوان عام: Polling بدل Webhook.
+    logger.warning(
+        "RENDER_EXTERNAL_URL/PUBLIC_URL غير موجود — سيُشغَّل البوت بوضع Polling."
+    )
+    application = build_application(webhook=False)
+    application.run_polling(
+        allowed_updates=["message", "callback_query"],
+        drop_pending_updates=False,
+    )
 
 
 if __name__ == "__main__":

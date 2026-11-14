@@ -9,7 +9,18 @@
 - 🩹 `/inpaint`: تعديل منطقة عبر ماسك أبيض/أسود.
 - 🎨 تأثيرات الصور: `/cartoon` `/blur` `/gray` `/sketch` `/edges`.
 - 🎬 تأثيرات الفيديو: أرسل فيديو (حتى 20 ثانية) ثم نفس الأوامر.
+- 🛠 `/developer` (أو `/status`): رسالة تشخيص كاملة للمطور.
 - 🔒 البوت خاص بـ `ALLOWED_USER_ID` فقط، والwebhook محمي بـ`WEBHOOK_SECRET`.
+
+## الفحص قبل النشر
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+python selftest.py
+```
+
+يطبع ✅ لكل مكوّن: الصور، التأثيرات، inpaint، تبديل الوجه، الفيديو، ورسالة المطور.
 
 ## متغيرات البيئة على Render
 
@@ -21,9 +32,10 @@
 | `AD_DURATION` | لا | مدة المحاكاة بالثواني (افتراضي 3) |
 | `MAX_VIDEO_SECONDS` | لا | أقصى مدة فيديو (افتراضي 20) |
 | `MAX_VIDEO_WIDTH` | لا | أقصى عرض للمعالجة (افتراضي 640) |
+| `MAX_IMAGE_SIDE` | لا | أقصى بُعد للصورة قبل المعالجة (افتراضي 2400) |
 | `MAX_UPLOAD_MB` | لا | أقصى حجم ملف (افتراضي 20) |
 
-`RENDER_EXTERNAL_URL` يوفّره Render تلقائيًا ويُستخدم لتسجيل الwebhook.
+`RENDER_EXTERNAL_URL` يوفّره Render تلقائيًا ويُستخدم لتسجيل الwebhook. عند غيابه يعمل البوت بوضع Polling تلقائيًا بدل التوقف.
 
 ## النشر
 
